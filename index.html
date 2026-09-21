@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Traceroute analysis</title>
+<meta name="description" content="An interactive 3D globe of the routes my data takes across the internet, built from traceroute results.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🛰️%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #000;
+    --ink: #a6ffc6;          /* body text: soft phosphor */
+    --ink-hi: #d6ffe6;       /* headings, hovered text */
+    --ink-dim: #52c481;      /* secondary text */
+    --ink-faint: #22754a;    /* tertiary text, disabled */
+    --line: rgba(80, 255, 150, .30);
+    --line-hi: rgba(80, 255, 150, .75);
+    --glow: #2dff7a;
+    --panel: rgba(0, 12, 5, .86);
+    --font-body: 'Share Tech Mono', 'Courier New', ui-monospace, monospace;
+    --font-pixel: 'VT323', 'Share Tech Mono', 'Courier New', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.6 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+
+  /* Faint digital rain behind everything */
+  #bgrain { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; opacity: .13; pointer-events: none; }
+  /* CRT scanlines + vignette over everything */
+  .crt {
+    position: fixed; inset: 0; z-index: 50; pointer-events: none;
+    background:
+      repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.22) 3px),
+      radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%);
+  }
+
+  .page { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 28px 20px 48px; }
+
+  /* ---------- Masthead ---------- */
+  .masthead h1 {
+    margin: 0 0 10px;
+    font: 400 clamp(44px, 7vw, 72px)/.95 var(--font-pixel);
+    color: var(--ink-hi);
+    letter-spacing: .01em;
+    text-shadow: 0 0 6px rgba(45,255,122,.9), 0 0 22px rgba(45,255,122,.45);
+  }
+  .masthead .cursor {
+    display: inline-block; width: .42em; height: .78em; margin-left: .12em;
+    background: var(--glow); vertical-align: -.02em;
+    box-shadow: 0 0 12px var(--glow);
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .lede { margin: 0; max-width: 84ch; color: var(--ink); }
+
+  /* ---------- Controls above the globe ---------- */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px;
+    margin: 18px 0 12px;
+  }
+  .group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .group-label { color: var(--ink-dim); margin-right: 2px; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 5px 12px 5px 10px;
+    background: transparent;
+    border: 1px solid var(--line);
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .chip:hover { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+  .chip[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--ink-hi); }
+  .chip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); opacity: var(--o, 1); }
+  .chip .from { color: var(--ink-dim); }
+
+  .toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 10px; background: transparent; border: 1px solid var(--line); cursor: pointer;
+  }
+  .toggle[aria-pressed="false"] { color: var(--ink-faint); border-style: dashed; }
+  .toggle .swatch { width: 24px; height: 3px; background: var(--glow); box-shadow: 0 0 6px var(--glow); opacity: var(--o, 1); }
+  .toggle[aria-pressed="false"] .swatch { opacity: .15; box-shadow: none; }
+
+  /* ---------- The globe stage ---------- */
+  .stage {
+    position: relative;
+    height: clamp(380px, calc(100vh - 440px), 700px);
+    border: 1px solid var(--line);
+    background: radial-gradient(ellipse at center, rgba(0, 40, 18, .55) 0%, rgba(0, 0, 0, 0) 68%);
+    overflow: hidden;
+  }
+  /* corner brackets, like a targeting frame */
+  .stage::before, .stage::after {
+    content: ""; position: absolute; width: 22px; height: 22px; pointer-events: none; z-index: 2;
+    border: 2px solid var(--line-hi);
+  }
+  .stage::before { top: 8px; left: 8px; border-right: 0; border-bottom: 0; }
+  .stage::after { bottom: 8px; right: 8px; border-left: 0; border-top: 0; }
+  #globe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #globe:focus-visible { outline-offset: -4px; }
+
+  .readout {
+    position: absolute; left: 18px; bottom: 14px; z-index: 2;
+    color: var(--ink-dim); font-size: 13px; pointer-events: none; text-shadow: 0 0 4px #000;
+  }
+  .controls { position: absolute; right: 18px; bottom: 14px; z-index: 2; display: flex; gap: 6px; }
+  .controls button {
+    min-width: 34px; height: 30px; padding: 0 10px;
+    background: var(--panel); border: 1px solid var(--line); cursor: pointer;
+  }
+  .controls button:hover { border-color: var(--line-hi); color: var(--ink-hi); }
+  .controls button[aria-pressed="true"] { border-color: var(--glow); color: var(--ink-hi); box-shadow: 0 0 8px rgba(45,255,122,.4) inset; }
+
+  /* ---------- Hover popup ---------- */
+  #tip {
+    position: fixed; z-index: 60; pointer-events: none;
+    max-width: min(600px, calc(100vw - 24px));
+    background: var(--panel); border: 1px solid var(--line-hi);
+    box-shadow: 0 0 18px rgba(45,255,122,.22);
+    padding: 8px 10px; font-size: 12.5px; line-height: 1.45;
+    max-height: calc(100vh - 16px); overflow: hidden;
+  }
+  #tip[hidden] { display: none; }
+  .tip-sec + .tip-sec { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .tip-head { display: flex; align-items: baseline; gap: 8px; color: var(--ink-hi); }
+  .tip-head .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); transform: translateY(-1px); }
+  .tip-head .where { color: var(--ink-dim); margin-left: auto; padding-left: 10px; white-space: nowrap; }
+  table.hops { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  table.hops th { text-align: left; font-weight: 400; color: var(--ink-dim); border-bottom: 1px solid var(--line); padding: 2px 8px 2px 0; }
+  table.hops td { vertical-align: top; padding: 3px 8px 3px 0; overflow-wrap: anywhere; }
+  table.hops td:first-child, table.hops th:first-child { width: 2.6em; }
+  table.hops tr.unplaced td { color: var(--ink-dim); font-style: italic; }
+  .tip-note { margin: 6px 0 0; color: var(--ink-dim); }
+  .tip-more { margin: 8px 0 0; color: var(--ink-dim); }
+
+  /* ---------- Notes panel ---------- */
+  .analysis {
+    margin-top: 14px; min-height: 168px;
+    padding: 14px 18px 16px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .analysis h2 { margin: 0 0 2px; font: 400 30px/1.1 var(--font-pixel); color: var(--ink-hi); display: flex; align-items: center; gap: 10px; }
+  .analysis h2 .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); flex: none; }
+  .analysis .meta { margin: 0 0 10px; color: var(--ink-dim); }
+  .analysis p.body { margin: 0; max-width: 78ch; }
+  .analysis p.empty { margin: 0; color: var(--ink-dim); }
+  .analysis p.empty::before { content: "> "; color: var(--glow); }
+  .analysis details { margin-top: 12px; }
+  .analysis summary { cursor: pointer; color: var(--ink-dim); width: fit-content; }
+  .analysis summary:hover { color: var(--ink-hi); }
+  .analysis .all-hops { margin-top: 8px; overflow-x: auto; }
+  .analysis .all-hops table.hops { min-width: 560px; font-size: 13px; }
+
+  .footnote { margin: 12px 2px 0; color: var(--ink-dim); font-size: 13px; max-width: 90ch; }
+
+  /* ---------- Boot screen ---------- */
+  #boot {
+    position: fixed; inset: 0; z-index: 100; background: #000;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 0 20px 14vh; cursor: pointer;
+    transition: opacity .7s ease;
+  }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .loader { position: relative; width: min(600px, 100%); }
+  .loader .row { display: flex; align-items: center; gap: 14px; font: 400 26px/1 var(--font-pixel); color: var(--glow); text-shadow: 0 0 8px rgba(45,255,122,.7); }
+  .loader .bar { flex: 1; display: flex; gap: 3px; padding: 4px; border: 1px solid var(--glow); box-shadow: 0 0 12px rgba(45,255,122,.35); background: rgba(0, 20, 8, .7); }
+  .loader .bar i { flex: 1; height: 18px; background: var(--glow); opacity: 0; box-shadow: 0 0 6px var(--glow); }
+  .loader .bar i.on { opacity: 1; }
+  .loader .tag { min-width: 3.4em; text-align: right; }
+  .loader .skip { margin: 10px 0 0; text-align: center; color: var(--ink-faint); font-size: 13px; }
+
+  @media (max-width: 640px) {
+    .page { padding: 18px 14px 36px; }
+    .stage { height: clamp(380px, 58vh, 520px); }
+    .controls { right: 10px; bottom: 10px; }
+    .readout { left: 12px; bottom: 44px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .masthead .cursor { animation: none; }
+    #boot { transition: none; }
+  }
+</style>
+</head>
+
+<body>
+  <canvas id="bgrain" aria-hidden="true"></canvas>
+  <div class="crt" aria-hidden="true"></div>
+
+  <div id="boot" role="status" aria-label="Loading">
+    <canvas id="boot-canvas" aria-hidden="true"></canvas>
+    <div class="loader">
+      <div class="row">
+        <span>Loading..</span>
+        <div class="bar" id="boot-bar"></div>
+        <span class="tag" id="boot-tag">INIT</span>
+      </div>
+      <p class="skip">click to skip</p>
+    </div>
+  </div>
+
+  <main class="page">
+    <header class="masthead">
+      <h1>Traceroute analysis<span class="cursor" aria-hidden="true"></span></h1>
+      <p class="lede">
+        Every line on this globe is a traceroute: a test that lists each router, or hop, a packet passes
+        through on its way to a website. I ran them from home and plotted where those hops sit. The color
+        of a line shows the destination, and brighter lines start at home while fainter ones start at
+        school. Drag to spin the globe, scroll to zoom, hover a point to see its hop, and click a line to
+        read what stands out about that path.
+      </p>
+    </header>
+
+    <section class="toolbar" aria-label="Choose traces">
+      <div class="group" id="chips" role="group" aria-label="Traces"></div>
+      <div class="group" id="origins" role="group" aria-label="Show traces from"></div>
+    </section>
+
+    <section class="stage" id="stage">
+      <canvas id="globe" tabindex="0" role="img"
+        aria-label="Interactive 3D globe showing traceroute paths. Use the trace buttons above to read the details of each path. Arrow keys rotate, plus and minus zoom."></canvas>
+      <div class="readout" id="readout" aria-hidden="true"></div>
+      <div class="controls" id="controls">
+        <button type="button" data-act="out" aria-label="Zoom out" title="Zoom out">&minus;</button>
+        <button type="button" data-act="in" aria-label="Zoom in" title="Zoom in">+</button>
+        <button type="button" data-act="fit" title="Zoom to all visible traces">Fit traces</button>
+        <button type="button" data-act="globe" title="Show the whole globe">Globe</button>
+        <button type="button" data-act="spin" aria-pressed="false" title="Slowly rotate the globe">Spin</button>
+      </div>
+    </section>
+
+    <section class="analysis" id="analysis" aria-live="polite">
+      <p class="empty">Click a line on the globe, or pick a trace above, to read what stands out about that path.</p>
+    </section>
+
+    <p class="footnote">
+      Points are city-level estimates placed from clues in hostnames, such as PHLAPA (Philadelphia) or
+      lga (LaGuardia airport). Hops with no location clue, including timeouts, aren't drawn; you'll find
+      them listed under the last point that was.
+    </p>
+  </main>
+
+  <div id="tip" role="tooltip" hidden></div>
+
+  <script src="vendor.js"></script>
+  <script src="traces.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
