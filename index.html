@@ -188,6 +188,31 @@
   .loader .tag { min-width: 3.4em; text-align: right; }
   .loader .skip { margin: 10px 0 0; text-align: center; color: var(--ink-faint); font-size: 13px; }
 
+  /* ---------- Share your route ---------- */
+  .share { margin-top: 26px; padding: 16px 18px 18px; border: 1px solid var(--line); background: var(--panel); }
+  .share h2 { margin: 0 0 4px; font: 400 30px/1.1 var(--font-pixel); color: var(--ink-hi); }
+  .share p { margin: 0 0 12px; max-width: 84ch; }
+  .share .how { color: var(--ink-dim); }
+  .share code { color: var(--ink-hi); }
+  .share form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  .share label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-dim); min-width: 0; }
+  .share label.wide { grid-column: 1 / -1; }
+  .share input, .share select, .share textarea {
+    font: 13px/1.45 var(--font-body); color: var(--ink-hi);
+    background: #000; border: 1px solid var(--line); padding: 7px 9px; border-radius: 0; width: 100%;
+  }
+  .share textarea { resize: vertical; }
+  .share input:focus, .share select:focus, .share textarea:focus { outline: none; border-color: var(--glow); box-shadow: 0 0 8px rgba(45,255,122,.35); }
+  .share .row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .share button[type=submit] {
+    padding: 7px 16px; background: rgba(45,255,122,.12); border: 1px solid var(--glow); color: var(--ink-hi); cursor: pointer;
+  }
+  .share button[type=submit]:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); }
+  #share-preview { color: var(--ink); flex: 1 1 300px; }
+  #share-status, #share-count { color: var(--ink-dim); font-size: 13px; margin: 0; }
+  #share-status::before { content: "● "; color: var(--glow); }
+  @media (max-width: 640px) { .share form { grid-template-columns: 1fr; } }
+
   @media (max-width: 640px) {
     .page { padding: 18px 14px 36px; }
     .stage { height: clamp(380px, 58vh, 520px); }
@@ -225,7 +250,7 @@
         through on its way to a website. I ran them from home and plotted where those hops sit. The color
         of a line shows the destination, and brighter lines start at home while fainter ones start at
         school. Drag to spin the globe, scroll to zoom, hover a point to see its hop, and click a line to
-        read what stands out about that path.
+        read what stands out about that path. Scroll down to add your own.
       </p>
     </header>
 
@@ -251,6 +276,43 @@
       <p class="empty">Click a line on the globe, or pick a trace above, to read what stands out about that path.</p>
     </section>
 
+    <section class="share" id="share" aria-labelledby="share-title">
+      <h2 id="share-title">Add your route</h2>
+      <p>
+        These are my paths, but the internet is shared. Run a traceroute from wherever you are and paste the
+        result here. It's saved to the page for everyone, drawn on the globe next to mine, and checked against
+        every other route for routers we have in common.
+      </p>
+      <p class="how">
+        Windows: open Command Prompt and run <code>tracert google.com</code>.
+        Mac or Linux: open Terminal and run <code>traceroute google.com</code>.
+        Any website works. Everything you post is public, so leave out anything you don't want to share.
+      </p>
+      <form id="share-form" autocomplete="off">
+        <label>Your name or nickname
+          <input name="name" maxlength="40" required>
+        </label>
+        <label>Where did you run it from? (optional)
+          <select name="city"><option value="">Rather not say</option></select>
+        </label>
+        <label class="wide">Paste the whole traceroute output
+          <textarea name="trace" rows="8" spellcheck="false" placeholder="Tracing route to google.com [142.251.167.17]&#10;  1     2 ms     1 ms     2 ms  router.local [192.168.1.1]&#10;  ..."></textarea>
+        </label>
+        <label class="wide" hidden>What did you trace?
+          <input name="dest" maxlength="200" placeholder="e.g. google.com">
+        </label>
+        <label class="wide">What surprised you about it? (optional)
+          <textarea name="note" rows="2" maxlength="600"></textarea>
+        </label>
+        <div class="row">
+          <button type="submit" disabled>Add to the globe</button>
+          <span id="share-preview" aria-live="polite"></span>
+        </div>
+      </form>
+      <p id="share-status" style="margin-top:12px"></p>
+      <p id="share-count"></p>
+    </section>
+
     <p class="footnote">
       Points are city-level estimates placed from clues in hostnames, such as PHLAPA (Philadelphia) or
       lga (LaGuardia airport). Hops with no location clue, including timeouts, aren't drawn; you'll find
@@ -263,5 +325,6 @@
   <script src="vendor.js"></script>
   <script src="traces.js"></script>
   <script src="app.js"></script>
+  <script type="module" src="shared.js"></script>
 </body>
 </html>

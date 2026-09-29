@@ -44,11 +44,12 @@
   }
 
   const traces = [];
-  (CFG.traces || []).forEach((t) => {
+  function buildTrace(t) {
     const origin = CFG.origins[t.from];
-    const dest = CFG.destinations[t.dest];
-    if (!origin) { console.warn(`[traceroute map] Trace "${t.id}" uses unknown origin "${t.from}". Add it to "origins" in traces.js.`); return; }
-    if (!dest) { console.warn(`[traceroute map] Trace "${t.id}" uses unknown destination "${t.dest}". Add it to "destinations" in traces.js.`); return; }
+    // Shared (Firebase) traces carry their own color instead of a destination key
+    const dest = CFG.destinations[t.dest] || (t.color ? { label: t.label, color: t.color } : null);
+    if (!origin) { console.warn(`[traceroute map] Trace "${t.id}" uses unknown origin "${t.from}". Add it to "origins" in traces.js.`); return null; }
+    if (!dest) { console.warn(`[traceroute map] Trace "${t.id}" uses unknown destination "${t.dest}". Add it to "destinations" in traces.js.`); return null; }
 
     // Group consecutive hops that share a location into one stop on the globe.
     // Hops with no location are attached to the last stop that had one.
@@ -76,7 +77,8 @@
       id: t.id,
       index: traces.length,
       originKey: t.from,
-      originLabel: origin.label,
+      originLabel: t.by || origin.label,   // shared traces show who ran them
+      shared: !!t.shared,
       opacity: origin.opacity ?? 1,
       label: t.label || dest.label,
       target: t.target || "",
@@ -109,8 +111,12 @@
       }
       tr.arcs.push({ pts });
     }
-    traces.push(tr);
-  });
+    return tr;
+  }
+  (CFG.traces || []).forEach((t) => { const tr = buildTrace(t); if (tr) traces.push(tr); });
+
+  /* "from home" for your own traces, "from Maya" for a visitor's */
+  const fromText = (tr) => (tr.shared ? tr.originLabel : tr.originLabel.toLowerCase());
 
   const byId = (id) => traces.find((t) => t.id === id);
 
@@ -527,7 +533,7 @@
       const shown = rows.slice(0, MAX_ROWS);
       hiddenRows += rows.length - shown.length;
       html += `<div class="tip-sec" style="--c:${esc(g.tr.color)}">` +
-        `<div class="tip-head"><i class="dot"></i><span>${esc(g.tr.label)}, from ${esc(g.tr.originLabel.toLowerCase())}</span>` +
+        `<div class="tip-head"><i class="dot"></i><span>${esc(g.tr.label)}, from ${esc(fromText(g.tr))}</span>` +
         (g.st.name ? `<span class="where">${esc(g.st.name)}</span>` : "") + `</div>` +
         hopsTable(shown) +
         (shown.some((r) => !r.placed) ? `<p class="tip-note">Faded rows have no location clue yet, so they're listed at the last point that had one.</p>` : "") +
@@ -718,25 +724,30 @@
 
   function buildChips() {
     const wrap = $("#chips");
-    if (!traces.length) return;
-    const label = document.createElement("span");
-    label.className = "group-label";
-    label.textContent = "Traces";
-    wrap.append(label);
-    for (const tr of traces) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "chip";
-      b.dataset.id = tr.id;
-      b.setAttribute("aria-pressed", "false");
-      b.style.setProperty("--c", tr.color);
-      b.style.setProperty("--o", tr.opacity);
-      b.innerHTML = `<span class="dot"></span><span>${esc(tr.label)}</span><span class="from">${esc(tr.originLabel.toLowerCase())}</span>`;
-      b.addEventListener("click", () => select(state.selected === tr.id ? null : tr.id));
-      b.addEventListener("mouseenter", () => { if (!state.selected) state.hoverChip = tr.id; });
-      b.addEventListener("mouseleave", () => { state.hoverChip = null; });
-      wrap.append(b);
+    wrap.textContent = "";
+    const groups = [["Traces", traces.filter((t) => !t.shared)], ["Visitors", traces.filter((t) => t.shared)]];
+    for (const [name, list] of groups) {
+      if (!list.length) continue;
+      const label = document.createElement("span");
+      label.className = "group-label";
+      label.textContent = name;
+      wrap.append(label);
+      for (const tr of list) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip";
+        b.dataset.id = tr.id;
+        b.setAttribute("aria-pressed", "false");
+        b.style.setProperty("--c", tr.color);
+        b.style.setProperty("--o", tr.opacity);
+        b.innerHTML = `<span class="dot"></span><span>${esc(tr.label)}</span><span class="from">${esc(fromText(tr))}</span>`;
+        b.addEventListener("click", () => select(state.selected === tr.id ? null : tr.id));
+        b.addEventListener("mouseenter", () => { if (!state.selected) state.hoverChip = tr.id; });
+        b.addEventListener("mouseleave", () => { state.hoverChip = null; });
+        wrap.append(b);
+      }
     }
+    updateChips();
   }
 
   function updateChips() {
@@ -750,7 +761,9 @@
   function buildOriginToggles() {
     const used = [...new Set(traces.map((t) => t.originKey))];
     const wrap = $("#origins");
-    if (used.length < 2) { wrap.hidden = true; return; }   // nothing to filter until there are traces from 2+ places
+    wrap.textContent = "";
+    wrap.hidden = used.length < 2;   // nothing to filter until there are traces from 2+ places
+    if (wrap.hidden) return;
     const label = document.createElement("span");
     label.className = "group-label";
     label.textContent = "Show";
@@ -760,7 +773,7 @@
       const b = document.createElement("button");
       b.type = "button";
       b.className = "toggle";
-      b.setAttribute("aria-pressed", "true");
+      b.setAttribute("aria-pressed", String(state.origins.has(key)));
       b.style.setProperty("--o", o.opacity ?? 1);
       b.innerHTML = `<span class="swatch"></span><span>${esc(o.label)}</span>`;
       b.addEventListener("click", () => {
@@ -785,7 +798,7 @@
     const rtt = tr.finalRtt ? `; the last one answered in ${esc(tr.finalRtt)}` : "";
     box.innerHTML =
       `<h2 style="--c:${esc(tr.color)}"><i class="dot"></i>${esc(tr.label)}</h2>` +
-      `<p class="meta">${esc(tr.target)}, traced from ${esc(tr.originLabel.toLowerCase())}. ${n} hops${rtt}.</p>` +
+      `<p class="meta">${esc(tr.target)}, traced ${tr.shared ? "by" : "from"} ${esc(fromText(tr))}. ${n} hops${rtt}.</p>` +
       `<p class="body">${esc(tr.conclusion)}</p>` +
       `<details><summary>Show all ${n} hops</summary><div class="all-hops">${hopsTable(tr.rows)}</div></details>`;
   }
@@ -950,8 +963,26 @@
   }
 
   // Expose a tiny hook so the page can be inspected from the console
+  /* Replace all visitor traces with a fresh list. shared.js calls this
+     every time the Firebase database changes. */
+  function setShared(list) {
+    const seenOrigins = new Set(traces.map((t) => t.originKey));
+    for (let i = traces.length - 1; i >= 0; i--) if (traces[i].shared) traces.splice(i, 1);
+    for (const t of list) {
+      const tr = buildTrace({ ...t, shared: true });
+      if (!tr) continue;
+      tr.index = traces.length;
+      traces.push(tr);
+      if (!seenOrigins.has(tr.originKey)) { seenOrigins.add(tr.originKey); state.origins.add(tr.originKey); }
+    }
+    if (state.selected && !byId(state.selected)) state.selected = null;
+    buildChips();
+    buildOriginToggles();
+    renderAnalysis();
+  }
+
   window.tracerouteMap = {
-    state, traces, select, flyTo, frame, projection,
+    state, traces, select, flyTo, frame, projection, setShared,
     pause() { paused = true; },
     resume() { if (paused) { paused = false; lastT = 0; requestAnimationFrame(loop); } },
     renderOnce() { stepFlight(performance.now()); draw(performance.now()); },
